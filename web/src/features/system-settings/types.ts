@@ -145,6 +145,8 @@ export type AuthSettings = {
   'oidc.token_endpoint': string
   'oidc.user_info_endpoint': string
   TelegramOAuthEnabled: boolean
+  'telegram.client_id': string
+  'telegram.client_secret': string
   TelegramBotToken: string
   TelegramBotName: string
   LinuxDOOAuthEnabled: boolean
@@ -218,6 +220,7 @@ export type ModelSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -277,6 +280,7 @@ export type BillingSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -420,6 +424,12 @@ export type DifferencesMap = Record<
   Partial<Record<RatioType, RatioDifference>>
 >
 
+export type PricingSyncValues = Partial<Record<RatioType, number | string>>
+export type PricingSyncModels = Record<
+  string,
+  { current: PricingSyncValues; upstreams: Record<string, PricingSyncValues> }
+>
+
 export type UpstreamChannelsResponse = {
   success: boolean
   message: string
@@ -449,6 +459,7 @@ export type UpstreamRatiosResponse = {
   message: string
   data: {
     differences: DifferencesMap
+    prices: PricingSyncModels
     test_results: TestResult[]
   }
 }

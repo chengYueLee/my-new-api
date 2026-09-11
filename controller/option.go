@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -85,7 +85,7 @@ func GetOptions(c *gin.Context) {
 	optionValues := make(map[string]string)
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
-		if k == "theme.frontend" {
+		if k == "theme.frontend" || k == "billing_setting.billing_mode" || k == "billing_setting.billing_expr" {
 			continue
 		}
 		value := common.Interface2String(v)
@@ -101,14 +101,24 @@ func GetOptions(c *gin.Context) {
 			Key:   k,
 			Value: value,
 		})
-		for _, optionKey := range completionRatioMetaOptionKeys {
-			if optionKey == k {
-				optionValues[k] = value
-				break
-			}
+		if slices.Contains(completionRatioMetaOptionKeys, k) {
+			optionValues[k] = value
 		}
 	}
 	common.OptionMapRWMutex.Unlock()
+	// Display the same effective expressions used by pricing and settlement,
+	// including built-in defaults absent from persisted administrator options.
+	for key, values := range map[string]map[string]string{
+		"billing_setting.billing_mode": billing_setting.GetBillingModeCopy(),
+		"billing_setting.billing_expr": billing_setting.GetBillingExprCopy(),
+	} {
+		encoded, err := common.Marshal(values)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		options = append(options, &model.Option{Key: key, Value: string(encoded)})
+	}
 	options = append(options, &model.Option{
 		Key:   "CompletionRatioMeta",
 		Value: buildCompletionRatioMetaValue(optionValues),
@@ -222,10 +232,11 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "TelegramOAuthEnabled":
-		if option.Value == "true" && common.TelegramBotToken == "" {
+		if option.Value == "true" && !system_setting.GetTelegramSettings().IsConfigured() {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "无法启用 Telegram OAuth，请先填入 Telegram Bot Token！",
+				"code":    "TELEGRAM_OAUTH_NOT_CONFIGURED",
+				"message": "Telegram OAuth is not configured or enabled. Please contact your administrator.",
 			})
 			return
 		}
@@ -347,22 +358,39 @@ func UpdateOption(c *gin.Context) {
 			models = append(models, modelName)
 		}
 		sort.Strings(models)
-		generation := jsplugin.DefaultRegistry.Generation()
+		storedVariants := billing_setting.GetPluginBillingExprCopy()
 		for _, modelName := range models {
-			expression := expressions[modelName]
-			if plugin, ok := generation.GetByModel(modelName); ok {
-				err = billing_setting.SmokeTestTaskExpr(expression, plugin.Meta.UsageSchema)
-			} else if target, resolved := model.ResolveTaskModelAlias(generation, modelName); resolved {
-				if plugin, ok := generation.Get(target.PluginKey); ok {
-					err = billing_setting.SmokeTestTaskExpr(expression, plugin.Meta.UsageSchema)
-				} else {
-					err = billing_setting.SmokeTestExpr(expression)
+			variants := make(map[string]any)
+			for key, expression := range storedVariants {
+				if plugin, name, ok := billing_setting.SplitPluginBillingExprKey(key); ok && name == modelName {
+					variants[plugin] = expression
 				}
-			} else {
-				err = billing_setting.SmokeTestExpr(expression)
 			}
+			err = model.ValidateModelPricing(modelName, model.PricingValues{
+				"billing_setting.billing_expr":          expressions[modelName],
+				billing_setting.PluginBillingExprOption: variants,
+			})
 			if err != nil {
 				common.ApiErrorMsg(c, fmt.Sprintf("模型 %s 的计费表达式无效: %v", modelName, err))
+				return
+			}
+		}
+	case billing_setting.PluginBillingExprOption:
+		var expressions map[string]string
+		if err = common.UnmarshalJsonStr(option.Value.(string), &expressions); err != nil || expressions == nil {
+			common.ApiErrorMsg(c, "plugin billing expressions must be a JSON object")
+			return
+		}
+		for key, expression := range expressions {
+			plugin, name, valid := billing_setting.SplitPluginBillingExprKey(key)
+			if !valid {
+				common.ApiErrorMsg(c, "invalid plugin billing expression key: "+key)
+				return
+			}
+			if err = model.ValidateModelPricing(name, model.PricingValues{
+				billing_setting.PluginBillingExprOption: map[string]any{plugin: expression},
+			}); err != nil {
+				common.ApiErrorMsg(c, err.Error())
 				return
 			}
 		}
@@ -409,7 +437,7 @@ func UpdateOption(c *gin.Context) {
 		return
 	}
 	// 出于安全考虑只记录被修改的配置项名称，不记录配置值（可能含密钥等敏感信息）。
-	recordManageAudit(c, "option.update", map[string]interface{}{
+	recordManageAudit(c, "option.update", map[string]any{
 		"key": option.Key,
 	})
 	c.JSON(http.StatusOK, gin.H{
