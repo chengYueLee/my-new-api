@@ -1,0 +1,141 @@
+# New-API Docker Compose Configuration
+# 
+# Quick Start:
+#   1. docker compose -f compose.production.yml up -d
+#   2. Blue: http://localhost:3006; Green: http://localhost:3008
+#
+# Using MySQL instead of PostgreSQL:
+#   1. Comment out the postgres service and SQL_DSN line 15
+#   2. Uncomment the mysql service and SQL_DSN line 16
+#   3. Uncomment mysql in depends_on (line 28)
+#   4. Uncomment mysql_data in volumes section (line 64)
+#
+# ⚠️  IMPORTANT: Change all default passwords before deploying to production!
+
+version: '3.4' # For compatibility with older Docker versions
+
+services:
+  new-api-blue:
+    # 手动维护：蓝环境源码打包后修改此处镜像名称和版本
+    image: my-new-api:v1.0.0
+    container_name: new-api-blue
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3006:3000"
+    volumes:
+      - ./data:/data
+      - ./logs-blue:/app/logs
+    environment:
+      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api?sslmode=disable
+      - REDIS_CONN_STRING=redis://:123456@redis:6379
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+      - BATCH_UPDATE_ENABLED=true
+      # 集群节点必须使用相同的 SESSION_SECRET。
+      - SESSION_SECRET=1aSKgAciW-3VfNWhyfIWtdLi8fzDnRAlTCzqb2Gqf3ZMKJwdNvAtF3Z9h4olSI5d
+      - NODE_NAME=new-api-blue
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - new-api-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  new-api-green:
+    # 手动维护：绿环境源码打包后修改此处镜像名称和版本
+    image: my-new-api:v1.0.0
+    container_name: new-api-green
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3008:3000"
+    volumes:
+      - ./data:/data
+      - ./logs-green:/app/logs
+    environment:
+      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api?sslmode=disable
+      - REDIS_CONN_STRING=redis://:123456@redis:6379
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+      - BATCH_UPDATE_ENABLED=true
+      # 集群节点必须使用相同的 SESSION_SECRET。
+      - SESSION_SECRET=1aSKgAciW-3VfNWhyfIWtdLi8fzDnRAlTCzqb2Gqf3ZMKJwdNvAtF3Z9h4olSI5d
+      - NODE_NAME=new-api-green
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - new-api-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    command: ["redis-server", "--requirepass", "123456"]  # ⚠️ IMPORTANT: Change this password in production!
+    networks:
+      - new-api-network
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 123456  # ⚠️ IMPORTANT: Change this password in production!
+      POSTGRES_DB: new-api
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - new-api-network
+#    ports:
+#      - "5432:5432"  # Uncomment if you need to access PostgreSQL from outside Docker
+
+#  mysql:
+#    image: mysql:8.2
+#    container_name: mysql
+#    restart: always
+#    environment:
+#      MYSQL_ROOT_PASSWORD: 123456  # ⚠️ IMPORTANT: Change this password in production!
+#      MYSQL_DATABASE: new-api
+#    volumes:
+#      - mysql_data:/var/lib/mysql
+#    networks:
+#      - new-api-network
+#    ports:
+#      - "3306:3306"  # Uncomment if you need to access MySQL from outside Docker
+
+#  clickhouse:
+#    image: clickhouse/clickhouse-server:24.8
+#    container_name: clickhouse
+#    restart: always
+#    environment:
+#      CLICKHOUSE_DB: new_api_logs
+#      CLICKHOUSE_USER: default
+#      CLICKHOUSE_PASSWORD: 123456  # ⚠️ IMPORTANT: Change this password in production!
+#      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+#    volumes:
+#      - clickhouse_data:/var/lib/clickhouse
+#    networks:
+#      - new-api-network
+#    ports:
+#      - "8123:8123"  # HTTP interface, uncomment if you need external access
+#      - "9000:9000"  # Native interface used by the LOG_SQL_DSN example above
+
+volumes:
+  pg_data:
+#  mysql_data:
+#  clickhouse_data:
+
+networks:
+  new-api-network:
+    driver: bridge

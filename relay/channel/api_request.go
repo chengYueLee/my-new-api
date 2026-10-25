@@ -552,6 +552,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
+	logger.LogDebug(c, "upstream response: channel=%d retry=%d status=%d content_type=%q upstream_request_id=%q downstream_written=%t downstream_status=%d",
+		info.ChannelId, info.RetryIndex, resp.StatusCode, resp.Header.Get("Content-Type"),
+		resp.Header.Get(common2.RequestIdKey), c.Writer.Written(), c.Writer.Status())
 
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()

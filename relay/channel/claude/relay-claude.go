@@ -299,6 +299,10 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 			sr.Stop(err)
 		}
 	})
+	logger.LogDebug(c, "claude stream before usage fallback: channel=%d retry=%d received=%d done=%t text_bytes=%d input_tokens=%d output_tokens=%d estimated_prompt_tokens=%d handler_error=%t stream_status=%s",
+		info.ChannelId, info.RetryIndex, info.ReceivedResponseCount, claudeInfo.Done,
+		claudeInfo.ResponseText.Len(), claudeInfo.Usage.PromptTokens, claudeInfo.Usage.CompletionTokens,
+		info.GetEstimatePromptTokens(), err != nil, info.StreamStatus.Summary())
 	if err != nil {
 		return nil, err
 	}
